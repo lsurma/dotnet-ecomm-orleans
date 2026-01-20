@@ -109,15 +109,28 @@ public class OrderStatisticsGrain : Grain<OrderStatisticsState>, IOrderStatistic
         // KOMPENSACJA - cofamy zmiany w widoku
         // COMPENSATION - rollback changes in view
         
+        // Tylko aktualizuj jeśli klient istnieje w statystykach
+        // Only update if customer exists in statistics
         if (State.CustomerStatistics.ContainsKey(customerId))
         {
             var customerStats = State.CustomerStatistics[customerId];
-            customerStats.TotalOrders--;
-            customerStats.TotalSpent -= orderTotal;
+            
+            // Zapobiegnij ujemnym wartościom
+            // Prevent negative values
+            if (customerStats.TotalOrders > 0)
+            {
+                customerStats.TotalOrders--;
+                customerStats.TotalSpent -= orderTotal;
+                
+                // Aktualizuj globalne statystyki tylko jeśli zaktualizowano klienta
+                // Update global statistics only if customer was updated
+                if (State.GlobalStatistics.TotalOrders > 0)
+                {
+                    State.GlobalStatistics.TotalOrders--;
+                    State.GlobalStatistics.TotalRevenue -= orderTotal;
+                }
+            }
         }
-
-        State.GlobalStatistics.TotalOrders--;
-        State.GlobalStatistics.TotalRevenue -= orderTotal;
 
         await WriteStateAsync();
     }

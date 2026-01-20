@@ -57,6 +57,16 @@ public class ProductIndexGrain : Grain<ProductIndexState>, IProductIndexGrain
         // AKTUALIZACJA INDEKSU W CZASIE RZECZYWISTYM
         // REAL-TIME INDEX UPDATE
         
+        // UWAGA: Ten grain jest shardowany po kategorii (klucz = nazwa kategorii)
+        // Aplikacja powinna wywoływać odpowiedni grain dla kategorii produktu
+        // 
+        // NOTE: This grain is sharded by category (key = category name)
+        // Application should call the appropriate grain for product's category
+        // 
+        // Przykład / Example:
+        // var categoryGrain = GrainFactory.GetGrain<IProductIndexGrain>("Electronics");
+        // await categoryGrain.AddProductAsync(product);
+        
         var entry = new ProductIndexEntry
         {
             ProductId = product.ProductId,
