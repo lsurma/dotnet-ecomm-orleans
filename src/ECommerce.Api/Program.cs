@@ -342,6 +342,83 @@ app.MapPost("/catalog/products/register", async (IClusterClient client, Register
 .WithName("RegisterProductInCatalog")
 .WithSummary("Rejestruje produkt w katalogu");
 
+// ==================== MATERIALIZED VIEW ENDPOINTS ====================
+
+/// <summary>
+/// MATERIALIZED VIEWS - Pre-obliczone statystyki i indeksy
+/// MATERIALIZED VIEWS - Pre-computed statistics and indexes
+/// 
+/// Zamiast agregacji za każdym razem (SELECT COUNT, SUM itp.)
+/// Instead of aggregating every time (SELECT COUNT, SUM, etc.)
+/// </summary>
+
+app.MapGet("/statistics/customer/{customerId:guid}", async (IClusterClient client, Guid customerId) =>
+{
+    // ODCZYT Z MATERIALIZED VIEW - natychmiastowy, bez zapytań agregujących
+    // READ FROM MATERIALIZED VIEW - immediate, no aggregating queries
+    
+    var statsGrain = client.GetGrain<IOrderStatisticsGrain>(Guid.Empty);
+    var stats = await statsGrain.GetCustomerStatisticsAsync(customerId);
+    
+    return Results.Ok(stats);
+})
+.WithName("GetCustomerStatistics")
+.WithSummary("Pobiera statystyki klienta (materialized view - natychmiastowe)");
+
+app.MapGet("/statistics/global", async (IClusterClient client) =>
+{
+    // GLOBALNE STATYSTYKI - pre-obliczone w grainie
+    // GLOBAL STATISTICS - pre-computed in grain
+    
+    var statsGrain = client.GetGrain<IOrderStatisticsGrain>(Guid.Empty);
+    var stats = await statsGrain.GetGlobalStatisticsAsync();
+    
+    return Results.Ok(stats);
+})
+.WithName("GetGlobalStatistics")
+.WithSummary("Pobiera globalne statystyki (materialized view)");
+
+app.MapGet("/index/{category}/products", async (IClusterClient client, string category) =>
+{
+    // INDEKS PRODUKTÓW PO KATEGORII (SHARDED INDEX)
+    // PRODUCT INDEX BY CATEGORY (SHARDED INDEX)
+    // Każda kategoria = osobny grain = naturalne partycjonowanie
+    // Each category = separate grain = natural partitioning
+    
+    var indexGrain = client.GetGrain<IProductIndexGrain>(category);
+    var products = await indexGrain.GetAllAsync();
+    
+    return Results.Ok(new { category, count = products.Count, products });
+})
+.WithName("GetProductsByCategory")
+.WithSummary("Pobiera produkty z indeksu dla danej kategorii");
+
+app.MapGet("/index/{category}/search", async (IClusterClient client, string category, string q, int limit = 20) =>
+{
+    // WYSZUKIWANIE W INDEKSIE (IN-MEMORY SEARCH)
+    // INDEX SEARCH (IN-MEMORY SEARCH)
+    
+    var indexGrain = client.GetGrain<IProductIndexGrain>(category);
+    var products = await indexGrain.SearchAsync(q, limit);
+    
+    return Results.Ok(new { category, query = q, count = products.Count, products });
+})
+.WithName("SearchInCategoryIndex")
+.WithSummary("Wyszukuje produkty w indeksie kategorii (materialized view)");
+
+app.MapGet("/index/{category}/price-range", async (IClusterClient client, string category, decimal min, decimal max) =>
+{
+    // FILTROWANIE PO CENIE (bez zapytania do bazy!)
+    // PRICE FILTERING (without database query!)
+    
+    var indexGrain = client.GetGrain<IProductIndexGrain>(category);
+    var products = await indexGrain.GetByPriceRangeAsync(min, max);
+    
+    return Results.Ok(new { category, minPrice = min, maxPrice = max, count = products.Count, products });
+})
+.WithName("GetProductsByPriceRange")
+.WithSummary("Pobiera produkty w zakresie cenowym (materialized view)");
+
 app.Run();
 
 // ==================== REQUEST DTOs ====================

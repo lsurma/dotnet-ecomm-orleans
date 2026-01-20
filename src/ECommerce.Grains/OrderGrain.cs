@@ -174,6 +174,18 @@ public class OrderGrain : Grain<OrderState>, IOrderGrain
         State.ConfirmedAt = DateTime.UtcNow;
 
         await WriteStateAsync();
+
+        // AKTUALIZUJ MATERIALIZED VIEW - Statystyki zamówień
+        // UPDATE MATERIALIZED VIEW - Order statistics
+        // W klasycznym podejściu: Cache invalidation lub REFRESH MATERIALIZED VIEW
+        // In classic approach: Cache invalidation or REFRESH MATERIALIZED VIEW
+        var statsGrain = GrainFactory.GetGrain<IOrderStatisticsGrain>(Guid.Empty); // Singleton stats grain
+        var orderInfo = await GetInfoAsync();
+        if (orderInfo != null)
+        {
+            await statsGrain.OnOrderConfirmedAsync(this.GetPrimaryKey(), State.CustomerId, orderInfo.GrossTotal);
+        }
+
         return true;
     }
 
@@ -190,6 +202,15 @@ public class OrderGrain : Grain<OrderState>, IOrderGrain
             // Return products to warehouse if they were reserved
             if (State.Status == OrderStatus.Confirmed)
             {
+                // Aktualizuj materialized view - anulowanie zamówienia
+                // Update materialized view - order cancellation
+                var orderInfo = await GetInfoAsync();
+                if (orderInfo != null)
+                {
+                    var statsGrain = GrainFactory.GetGrain<IOrderStatisticsGrain>(Guid.Empty);
+                    await statsGrain.OnOrderCancelledAsync(this.GetPrimaryKey(), State.CustomerId, orderInfo.GrossTotal);
+                }
+
                 foreach (var item in State.Items)
                 {
                     var productGrain = GrainFactory.GetGrain<IProductGrain>(item.ProductId);
