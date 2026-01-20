@@ -22,7 +22,7 @@ echo ""
 read -p "Naciśnij Enter aby kontynuować / Press Enter to continue..."
 
 # API endpoint
-API="http://localhost:5000"
+API="http://localhost:5269"
 
 echo ""
 echo "======================================"
