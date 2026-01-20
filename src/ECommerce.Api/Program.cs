@@ -29,6 +29,10 @@ using ECommerce.Contracts.Models;
 /// - Calls are remote but look local
 /// </summary>
 
+// Stała dla ID grainu katalogu (singleton catalog)
+// Constant for catalog grain ID (singleton catalog)
+const string CATALOG_GRAIN_ID = "00000000-0000-0000-0000-000000000001";
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -124,7 +128,7 @@ app.MapPost("/products", async (IClusterClient client, CreateProductRequest requ
     
     // Automatycznie dodaj do katalogu
     // Automatically add to catalog
-    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogId = Guid.Parse(CATALOG_GRAIN_ID);
     var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
     await catalogGrain.AddProductAsync(productId);
     
@@ -248,7 +252,7 @@ app.MapPost("/catalog/products/batch", async (IClusterClient client, GetProducts
         .ToList();
     
     var results = await Task.WhenAll(tasks);
-    var products = results.Where(p => p != null).Cast<ProductInfo>().ToList();
+    var products = results.Where(p => p != null).ToList()!;
     
     // Czas: max(wszystkie wywołania) (~10-20ms dla 20 produktów)
     // Time: max(all calls) (~10-20ms for 20 products)
@@ -282,7 +286,7 @@ app.MapPost("/catalog/products/batch-via-catalog", async (IClusterClient client,
     // - Catalog can cache references
     // - Easier testing and monitoring
     
-    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Singleton catalog
+    var catalogId = Guid.Parse(CATALOG_GRAIN_ID); // Singleton catalog
     var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
     var products = await catalogGrain.GetProductsAsync(request.ProductIds);
     
@@ -296,7 +300,7 @@ app.MapPost("/catalog/products/batch-via-catalog", async (IClusterClient client,
 
 app.MapGet("/catalog/products/all", async (IClusterClient client) =>
 {
-    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogId = Guid.Parse(CATALOG_GRAIN_ID);
     var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
     
     var productIds = await catalogGrain.GetAllProductIdsAsync();
@@ -312,7 +316,7 @@ app.MapGet("/catalog/products/all", async (IClusterClient client) =>
 
 app.MapGet("/catalog/products/search", async (IClusterClient client, string q, int limit = 20) =>
 {
-    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogId = Guid.Parse(CATALOG_GRAIN_ID);
     var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
     
     var products = await catalogGrain.SearchProductsAsync(q, limit);
@@ -329,7 +333,7 @@ app.MapGet("/catalog/products/search", async (IClusterClient client, string q, i
 // Hook do dodawania produktu do katalogu
 app.MapPost("/catalog/products/register", async (IClusterClient client, RegisterProductRequest request) =>
 {
-    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogId = Guid.Parse(CATALOG_GRAIN_ID);
     var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
     await catalogGrain.AddProductAsync(request.ProductId);
     

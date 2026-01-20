@@ -1,4 +1,5 @@
 using ECommerce.Contracts.Models;
+using Orleans;
 
 namespace ECommerce.Contracts.Grains;
 
