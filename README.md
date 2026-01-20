@@ -230,6 +230,77 @@ public async Task<bool> AddItemAsync(Guid productId, int quantity)
 }
 ```
 
+### 5. Operacje na Listach - Fan-Out Pattern / Batch Operations - Fan-Out Pattern
+
+**Problem:** Jak pobrać 20 produktów efektywnie?
+
+**Naiwne podejście (WOLNE ❌):**
+```csharp
+// N wywołań sekwencyjnych = N * latency
+var products = new List<ProductInfo>();
+foreach (var id in productIds)  // 20 iteracji
+{
+    var grain = client.GetGrain<IProductGrain>(id);
+    var info = await grain.GetInfoAsync();  // Czekamy ~10ms
+    if (info != null) products.Add(info);
+}
+// Łączny czas: 20 * 10ms = 200ms
+```
+
+**Optymalne podejście (SZYBKIE ✅):**
+```csharp
+// FAN-OUT PATTERN: Wszystkie wywołania równolegle
+var tasks = productIds
+    .Select(id => client.GetGrain<IProductGrain>(id).GetInfoAsync())
+    .ToList();
+
+var results = await Task.WhenAll(tasks);  // Czeka na wszystkie jednocześnie
+var products = results.Where(p => p != null).ToList();
+// Łączny czas: max(10ms) = ~10ms (20x szybciej!)
+```
+
+**Przykład: Pobieranie 20 produktów**
+```bash
+# Metoda 1: Fan-out bezpośrednio w API
+curl -X POST http://localhost:5269/catalog/products/batch \
+  -H "Content-Type: application/json" \
+  -d '{"productIds": ["id1", "id2", ..., "id20"]}'
+
+# Metoda 2: Przez grain katalogowy (zalecane dla większych list)
+curl -X POST http://localhost:5269/catalog/products/batch-via-catalog \
+  -H "Content-Type: application/json" \
+  -d '{"productIds": ["id1", "id2", ..., "id20"]}'
+
+# Wyszukiwanie produktów
+curl "http://localhost:5269/catalog/products/search?q=laptop&limit=20"
+```
+
+**Porównanie wydajności:**
+
+| Metoda | Liczba produktów | Czas |
+|--------|-----------------|------|
+| Sekwencyjna (❌) | 20 | ~200ms |
+| Fan-out (✅) | 20 | ~10-20ms |
+| Sekwencyjna (❌) | 100 | ~1000ms |
+| Fan-out (✅) | 100 | ~10-30ms |
+
+**Zalety Fan-Out Pattern:**
+- ✅ Czas proporcjonalny do najwolniejszego grainu, nie suma wszystkich
+- ✅ Wykorzystuje równoległość sieci i CPU
+- ✅ Skaluje się liniowo z liczbą produktów
+- ✅ Orleans automatycznie rozdziela grainy po serwerach w klastrze
+
+**W klasycznym podejściu:**
+```csharp
+// Jedno zapytanie SQL, ale...
+var products = await _dbContext.Products
+    .Where(p => productIds.Contains(p.Id))
+    .ToListAsync();
+// - Wymaga połączenia z bazą przy każdym żądaniu
+// - Nie skaluje się horyzontalnie bez sharding
+// - Trudne cachowanie (invalidacja)
+```
+
 ---
 
 ## 🚀 Uruchomienie / Getting Started

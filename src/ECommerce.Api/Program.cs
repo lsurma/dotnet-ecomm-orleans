@@ -121,6 +121,13 @@ app.MapPost("/products", async (IClusterClient client, CreateProductRequest requ
         request.InitialStock);
     
     var productInfo = await productGrain.GetInfoAsync();
+    
+    // Automatycznie dodaj do katalogu
+    // Automatically add to catalog
+    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
+    await catalogGrain.AddProductAsync(productId);
+    
     return Results.Created($"/products/{productId}", productInfo);
 })
 .WithName("CreateProduct")
@@ -208,6 +215,129 @@ app.MapGet("/orders/{id:guid}", async (IClusterClient client, Guid id) =>
 .WithName("GetOrder")
 .WithSummary("Pobiera informacje o zamówieniu");
 
+// ==================== CATALOG ENDPOINTS (BATCH OPERATIONS) ====================
+
+/// <summary>
+/// PRZYKŁAD: Pobieranie wielu produktów naraz
+/// EXAMPLE: Fetching multiple products at once
+/// 
+/// To pokazuje różne podejścia do operacji na listach w Orleans
+/// This shows different approaches to list operations in Orleans
+/// </summary>
+
+app.MapPost("/catalog/products/batch", async (IClusterClient client, GetProductsRequest request) =>
+{
+    // PODEJŚCIE 1 (NAIWNE - WOLNE): Sekwencyjne wywołania
+    // APPROACH 1 (NAIVE - SLOW): Sequential calls
+    // ----------------------------------------------------
+    // var result = new List<ProductInfo>();
+    // foreach (var id in request.ProductIds)
+    // {
+    //     var grain = client.GetGrain<IProductGrain>(id);
+    //     var info = await grain.GetInfoAsync();
+    //     if (info != null) result.Add(info);
+    // }
+    // Czas: N * latency (~200ms dla 20 produktów)
+    // Time: N * latency (~200ms for 20 products)
+
+    // PODEJŚCIE 2 (OPTYMALNE): Fan-out pattern bezpośrednio w API
+    // APPROACH 2 (OPTIMAL): Fan-out pattern directly in API
+    // ----------------------------------------------------
+    var tasks = request.ProductIds
+        .Select(id => client.GetGrain<IProductGrain>(id).GetInfoAsync())
+        .ToList();
+    
+    var results = await Task.WhenAll(tasks);
+    var products = results.Where(p => p != null).Cast<ProductInfo>().ToList();
+    
+    // Czas: max(wszystkie wywołania) (~10-20ms dla 20 produktów)
+    // Time: max(all calls) (~10-20ms for 20 products)
+    
+    return Results.Ok(new { 
+        count = products.Count,
+        products = products 
+    });
+})
+.WithName("GetProductsBatch")
+.WithSummary("Pobiera wiele produktów naraz (fan-out pattern)");
+
+app.MapPost("/catalog/products/batch-via-catalog", async (IClusterClient client, GetProductsRequest request) =>
+{
+    // PODEJŚCIE 3 (NAJLEPSZE dla dużych list): Przez grain katalogowy
+    // APPROACH 3 (BEST for large lists): Via catalog grain
+    // ----------------------------------------------------
+    // Zamiast wielu wywołań HTTP -> API -> Grain
+    // Jedno wywołanie HTTP -> API -> CatalogGrain -> Fan-out do ProductGrains
+    //
+    // Zalety:
+    // - Mniej wywołań przez sieć (API <-> Silo)
+    // - Katalog może cache'ować referencje
+    // - Łatwiejsze testowanie i monitoring
+    //
+    // Instead of many HTTP calls -> API -> Grain
+    // One HTTP call -> API -> CatalogGrain -> Fan-out to ProductGrains
+    //
+    // Benefits:
+    // - Fewer network calls (API <-> Silo)
+    // - Catalog can cache references
+    // - Easier testing and monitoring
+    
+    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Singleton catalog
+    var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
+    var products = await catalogGrain.GetProductsAsync(request.ProductIds);
+    
+    return Results.Ok(new { 
+        count = products.Count,
+        products = products 
+    });
+})
+.WithName("GetProductsBatchViaCatalog")
+.WithSummary("Pobiera wiele produktów przez grain katalogowy (optymalne)");
+
+app.MapGet("/catalog/products/all", async (IClusterClient client) =>
+{
+    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
+    
+    var productIds = await catalogGrain.GetAllProductIdsAsync();
+    var products = await catalogGrain.GetProductsAsync(productIds);
+    
+    return Results.Ok(new { 
+        count = products.Count,
+        products = products 
+    });
+})
+.WithName("GetAllProducts")
+.WithSummary("Pobiera wszystkie produkty z katalogu");
+
+app.MapGet("/catalog/products/search", async (IClusterClient client, string q, int limit = 20) =>
+{
+    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
+    
+    var products = await catalogGrain.SearchProductsAsync(q, limit);
+    
+    return Results.Ok(new { 
+        count = products.Count,
+        products = products,
+        query = q
+    });
+})
+.WithName("SearchProducts")
+.WithSummary("Wyszukuje produkty (demo fan-out + filtrowanie)");
+
+// Hook do dodawania produktu do katalogu
+app.MapPost("/catalog/products/register", async (IClusterClient client, RegisterProductRequest request) =>
+{
+    var catalogId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    var catalogGrain = client.GetGrain<IProductCatalogGrain>(catalogId);
+    await catalogGrain.AddProductAsync(request.ProductId);
+    
+    return Results.Ok(new { message = "Product added to catalog", productId = request.ProductId });
+})
+.WithName("RegisterProductInCatalog")
+.WithSummary("Rejestruje produkt w katalogu");
+
 app.Run();
 
 // ==================== REQUEST DTOs ====================
@@ -216,3 +346,6 @@ record CreateCustomerRequest(string Name, string Email, CustomerType CustomerTyp
 record CreateProductRequest(string Name, string Description, decimal RetailPrice, decimal WholesalePrice, int InitialStock);
 record CreateOrderRequest(Guid CustomerId);
 record AddOrderItemRequest(Guid ProductId, int Quantity);
+record GetProductsRequest(List<Guid> ProductIds);
+record RegisterProductRequest(Guid ProductId);
+
